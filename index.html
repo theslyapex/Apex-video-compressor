@@ -223,37 +223,70 @@ function selectFile(file){if(!file)return;if(isProcessing){notify('لطفاً ص
 dropzone.addEventListener('click',()=>{if(!isProcessing)fileInput.click()});dropzone.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();if(!isProcessing)fileInput.click()}});fileInput.addEventListener('change',()=>selectFile(fileInput.files[0]));$('removeFile').addEventListener('click',resetFile);dropzone.addEventListener('dragover',e=>{e.preventDefault();dropzone.classList.add('dragover')});dropzone.addEventListener('dragleave',()=>dropzone.classList.remove('dragover'));dropzone.addEventListener('drop',e=>{e.preventDefault();dropzone.classList.remove('dragover');if(e.dataTransfer.files.length)selectFile(e.dataTransfer.files[0])});quality.addEventListener('input',updateQualityLabel);resolution.addEventListener('change',estimateOutputSize);
 targetEnabled.addEventListener('change',()=>{targetSize.disabled=!targetEnabled.checked;estimateOutputSize()});targetSize.addEventListener('input',estimateOutputSize);
 function lockUI(locked){isProcessing=locked;compressBtn.disabled=locked||!selectedFile;$('removeFile').disabled=locked;fileInput.disabled=locked;quality.disabled=locked;resolution.disabled=locked;preset.disabled=locked;codec.disabled=locked;targetEnabled.disabled=locked;targetSize.disabled=locked||!targetEnabled.checked;dropzone.style.pointerEvents=locked?'none':'';compressBtn.classList.toggle('loading',locked);buttonText.textContent=locked?'در حال فشرده‌سازی...':selectedFile?'شروع فشرده‌سازی':'انتخاب ویدیو برای شروع'}
+async function fetchBlobURL(url, mime, timeoutMs, label, onProgress){
+ const controller=new AbortController();
+ const timer=setTimeout(()=>controller.abort(),timeoutMs);
+ try{
+  const response=await fetch(url,{signal:controller.signal,cache:'no-store'});
+  if(!response.ok)throw new Error(`${label}: HTTP ${response.status}`);
+  const total=Number(response.headers.get('content-length'))||0;
+  if(!response.body){const blob=await response.blob();return URL.createObjectURL(new Blob([blob],{type:mime||blob.type}));}
+  const reader=response.body.getReader();let received=0;const chunks=[];
+  while(true){
+   const {done,value}=await reader.read();if(done)break;
+   chunks.push(value);received+=value.byteLength;
+   if(onProgress)onProgress(received,total);
+  }
+  return URL.createObjectURL(new Blob(chunks,{type:mime}));
+ }catch(e){if(e.name==='AbortError')throw new Error(`${label}: بیش از حد طول کشید یا اتصال قطع شد (${Math.round(timeoutMs/1000)} ثانیه).`);throw e;}
+ finally{clearTimeout(timer);}
+}
 async function loadEngine(){
  if(ffmpegReady)return;
- setProgress(2,'آماده‌سازی کتابخانه‌ها...','در حال بررسی چند منبع جایگزین.');
+ setProgress(2,'آماده‌سازی کتابخانه‌ها...','در حال بارگیری کد کتابخانه؛ در صورت مشکل خطا با زمان محدود نمایش داده می‌شود.');
  await loadLibraries();
- ffmpeg=new FFmpegClass();
- ffmpeg.on('log',({message})=>console.log('[FFmpeg]',message));
- ffmpeg.on('progress',({progress})=>{if(!isProcessing||!Number.isFinite(progress))return;const now=Date.now();if(now-lastProgressUpdate<250)return;lastProgressUpdate=now;actualProgress=Math.max(actualProgress,Math.min(94,progress*94));setProgress(actualProgress,'در حال پردازش ویدیو...','مدت پردازش به حجم فایل، کیفیت و توان دستگاه بستگی دارد.')});
- setProgress(3,'بارگیری موتور پردازش...','Worker محلی آماده می‌شود و موتور پردازش از شبکه بارگیری می‌شود؛ لطفاً صفحه را نبند.');
+ const workerURL=new URL('./worker.js',window.location.href).href;
+ // The worker and its relative imports are hosted on this GitHub Pages origin.
  const cdns=[
   'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd',
   'https://unpkg.com/@ffmpeg/core@0.12.10/dist/umd',
-  'https://fastly.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd',
-  'https://gcore.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd',
-  'https://esm.sh/@ffmpeg/core@0.12.10/dist/umd'
+  'https://fastly.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd'
  ];
  let lastError;
- for(const baseURL of cdns){
+ for(let i=0;i<cdns.length;i++){
+  const baseURL=cdns[i];let coreURL=null,wasmURL=null;
   try{
-   console.info('[FFmpeg] Trying core CDN:',baseURL);
-   const coreURL=await toBlobURL(`${baseURL}/ffmpeg-core.js`,'text/javascript');
-   const wasmURL=await toBlobURL(`${baseURL}/ffmpeg-core.wasm`,'application/wasm');
-   // Serve the FFmpeg class worker from this GitHub Pages origin to avoid cross-origin Worker errors.
-   // worker.js imports ./const.js and ./errors.js, all stored beside index.html.
-   const classWorkerURL=new URL('./worker.js', window.location.href).href;
-   await ffmpeg.load({coreURL,wasmURL,classWorkerURL});
+   setProgress(3,`بارگیری موتور پردازش (${i+1}/${cdns.length})...`,'در حال دریافت فایل موتور؛ درصد پیشرفت دریافت در اینجا نمایش داده می‌شود.');
+   console.info('[FFmpeg] Trying core CDN:',baseURL,'worker:',workerURL);
+   coreURL=await fetchBlobURL(`${baseURL}/ffmpeg-core.js`,'text/javascript',45000,'دریافت ffmpeg-core.js');
+   setProgress(4,'بارگیری فایل WASM...','فایل موتور حدود ۳۳ مگابایت است؛ این نوار هنگام دریافت باید حرکت کند.');
+   wasmURL=await fetchBlobURL(`${baseURL}/ffmpeg-core.wasm`,'application/wasm',180000,'دریافت ffmpeg-core.wasm',(received,total)=>{
+    const fraction=total>0?Math.min(1,received/total):0;
+    setProgress(4+fraction*2,'بارگیری فایل WASM...',`${formatBytes(received)}${total?' از '+formatBytes(total):''} دریافت شد.`);
+   });
+   setProgress(6,'راه‌اندازی Worker...','فایل‌های محلی worker.js و وابستگی‌هایش در حال بارگیری هستند.');
+   ffmpeg=new FFmpegClass();
+   ffmpeg.on('log',({message})=>console.log('[FFmpeg]',message));
+   ffmpeg.on('progress',({progress})=>{if(!isProcessing||!Number.isFinite(progress))return;const now=Date.now();if(now-lastProgressUpdate<250)return;lastProgressUpdate=now;actualProgress=Math.max(actualProgress,Math.min(94,progress*94));setProgress(actualProgress,'در حال پردازش ویدیو...','مدت پردازش به حجم فایل، کیفیت و توان دستگاه بستگی دارد.')});
+   let loadTimer;
+   try{
+    await Promise.race([
+     ffmpeg.load({coreURL,wasmURL,classWorkerURL:workerURL}),
+     new Promise((_,reject)=>{loadTimer=setTimeout(()=>reject(new Error('راه‌اندازی FFmpeg بیش از ۹۰ ثانیه طول کشید. مسیر worker.js یا وابستگی‌های آن را بررسی کن.')),90000)})
+    ]);
+   }finally{clearTimeout(loadTimer)}
    ffmpegReady=true;
+   URL.revokeObjectURL(coreURL);URL.revokeObjectURL(wasmURL);
    console.info('[FFmpeg] Engine loaded successfully from',baseURL);
    return;
-  }catch(error){lastError=error;console.error('[FFmpeg] CDN failed:',baseURL,error);try{ffmpeg.terminate()}catch(_){}ffmpeg=new FFmpegClass();ffmpeg.on('log',({message})=>console.log('[FFmpeg]',message));ffmpeg.on('progress',({progress})=>{if(!isProcessing||!Number.isFinite(progress))return;const now=Date.now();if(now-lastProgressUpdate<250)return;lastProgressUpdate=now;actualProgress=Math.max(actualProgress,Math.min(94,progress*94));setProgress(actualProgress,'در حال پردازش ویدیو...','مدت پردازش به حجم فایل، کیفیت و توان دستگاه بستگی دارد.')});}
+  }catch(error){
+   lastError=error;console.error('[FFmpeg] CDN/worker failed:',baseURL,error);
+   if(coreURL)URL.revokeObjectURL(coreURL);if(wasmURL)URL.revokeObjectURL(wasmURL);
+   try{ffmpeg?.terminate()}catch(_){}
+   ffmpeg=null;
+  }
  }
- throw new Error('بارگیری موتور از هر ۵ سرور ناموفق بود. آخرین خطا: '+(lastError?.message||String(lastError||'خطای نامشخص')));
+ throw new Error('موتور بارگیری نشد. آخرین خطا: '+(lastError?.message||String(lastError||'خطای نامشخص')));
 }
 function getOutputResolution(){const r=resolution.value;if(r==='original')return null;const height=Number(r);if(!inputWidth||!inputHeight)return`scale=-2:${height}`;if(inputHeight<=height)return null;return`scale=-2:${height}`}
 async function compressVideo(){if(!selectedFile||isProcessing)return;const file=selectedFile,inputName='input_'+Date.now()+'.'+(getExtension(file.name).replace(/[^a-z0-9]/g,'')||'mp4'),outputName='compressed_'+Date.now()+'.mp4',originalSize=file.size;lockUI(true);resetResult();progressSection.classList.add('show');actualProgress=0;lastProgressUpdate=0;setProgress(1,'شروع پردازش...','لطفاً این صفحه را باز نگه دار.');try{await loadEngine();setProgress(8,'آماده‌سازی فایل...','ویدیو در حافظه موقت مرورگر آماده می‌شود.');await ffmpeg.writeFile(inputName,await fetchFile(file));const q=Number(quality.value),selectedPreset=preset.value,selectedCodec=codec.value,filters=[],scale=getOutputResolution();if(scale)filters.push(scale);const videoEncoder=selectedCodec==='mpeg4'?'mpeg4':'libx264';const args=['-i',inputName,'-map','0:v:0','-map','0:a?','-c:v',videoEncoder];if(selectedCodec==='h264')args.push('-preset',selectedPreset,'-pix_fmt','yuv420p');if(targetEnabled.checked&&durationSeconds>0){const targetBytes=Math.max(1,Number(targetSize.value||20))*1024*1024;const totalKbps=(targetBytes*8/durationSeconds)/1000;const audioKbps=128;const videoKbps=Math.max(80,Math.floor(totalKbps-audioKbps));args.push('-b:v',videoKbps+'k','-maxrate',videoKbps+'k','-bufsize',Math.max(videoKbps*2,160)+'k','-b:a',Math.max(32,Math.min(audioKbps,Math.floor(totalKbps*.15)))+'k');}else{if(selectedCodec==='h264')args.push('-crf',String(q));else args.push('-q:v',String(Math.max(2,Math.min(31,Math.round(q*.65)))));args.push('-b:a','128k');}if(filters.length)args.push('-vf',filters.join(','));args.push('-movflags','+faststart','-y',outputName);setProgress(12,'در حال فشرده‌سازی...','فایل ممکن است چند دقیقه برای پردازش نیاز داشته باشد.');await ffmpeg.exec(args);setProgress(96,'ساخت فایل خروجی...','در حال آماده‌سازی فایل دانلود.');const data=await ffmpeg.readFile(outputName);if(!data||!data.length)throw new Error('فایل خروجی ساخته نشد.');const blob=new Blob([data],{type:'video/mp4'});outputURL=URL.createObjectURL(blob);const outputSize=blob.size,difference=originalSize-outputSize,percent=originalSize?(difference/originalSize)*100:0;$('originalSize').textContent=formatBytes(originalSize);$('outputSize').textContent=formatBytes(outputSize);if(difference>0){$('savingPercent').textContent=percent.toLocaleString('fa-IR',{maximumFractionDigits:1})+'٪ کاهش';$('resultNote').textContent='حجم فایل '+formatBytes(difference)+' کاهش یافته است. نتیجه به تنظیمات و محتوای ویدیو بستگی دارد.'}else if(difference<0){$('savingPercent').textContent=Math.abs(percent).toLocaleString('fa-IR',{maximumFractionDigits:1})+'٪ افزایش';$('resultNote').textContent='این بار فایل خروجی بزرگ‌تر شده است. برای کاهش بیشتر حجم، رزولوشن پایین‌تر یا مقدار CRF بالاتر را امتحان کن.'}else{$('savingPercent').textContent='بدون تغییر';$('resultNote').textContent='حجم فایل تغییر محسوسی نکرده است. تنظیمات دیگری را امتحان کن.'}$('beforeCompare').textContent=formatBytes(originalSize);$('afterCompare').textContent=formatBytes(outputSize);$('beforeBar').style.width='100%';$('afterBar').style.width=Math.max(2,Math.min(100,(outputSize/Math.max(originalSize,outputSize))*100))+'%';$('resultCodec').textContent=selectedCodec==='mpeg4'?'MPEG-4':'H.264';downloadBtn.href=outputURL;downloadBtn.download=file.name.replace(/\.[^.]+$/,'')+'_compressed.mp4';resultCard.classList.add('show');setProgress(100,'فشرده‌سازی کامل شد','فایل آماده دانلود است.');await ffmpeg.deleteFile(inputName).catch(()=>{});await ffmpeg.deleteFile(outputName).catch(()=>{});notify('فشرده‌سازی با موفقیت انجام شد.')}catch(error){console.error(error);const detail=String(error?.message||error||'خطای نامشخص');setProgress(actualProgress,'خطا در پردازش',detail.length>240?detail.slice(0,240)+'…':detail);notify(detail.includes('بارگیری موتور')?'موتور بارگیری نشد؛ اتصال اینترنت یا دسترسی به CDN را بررسی کن.':'پردازش ناموفق بود؛ جزئیات خطا در بخش وضعیت نمایش داده شده است.');if(ffmpeg){await ffmpeg.deleteFile(inputName).catch(()=>{});await ffmpeg.deleteFile(outputName).catch(()=>{})}}finally{lockUI(false)}}

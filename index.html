@@ -230,7 +230,7 @@ async function loadEngine(){
  ffmpeg=new FFmpegClass();
  ffmpeg.on('log',({message})=>console.log('[FFmpeg]',message));
  ffmpeg.on('progress',({progress})=>{if(!isProcessing||!Number.isFinite(progress))return;const now=Date.now();if(now-lastProgressUpdate<250)return;lastProgressUpdate=now;actualProgress=Math.max(actualProgress,Math.min(94,progress*94));setProgress(actualProgress,'در حال پردازش ویدیو...','مدت پردازش به حجم فایل، کیفیت و توان دستگاه بستگی دارد.')});
- setProgress(3,'بارگیری موتور پردازش...','در حال امتحان کردن حداکثر ۵ سرور جایگزین؛ لطفاً صفحه را نبند.');
+ setProgress(3,'بارگیری موتور پردازش...','Worker محلی آماده می‌شود و موتور پردازش از شبکه بارگیری می‌شود؛ لطفاً صفحه را نبند.');
  const cdns=[
   'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd',
   'https://unpkg.com/@ffmpeg/core@0.12.10/dist/umd',
@@ -244,7 +244,10 @@ async function loadEngine(){
    console.info('[FFmpeg] Trying core CDN:',baseURL);
    const coreURL=await toBlobURL(`${baseURL}/ffmpeg-core.js`,'text/javascript');
    const wasmURL=await toBlobURL(`${baseURL}/ffmpeg-core.wasm`,'application/wasm');
-   await ffmpeg.load({coreURL,wasmURL});
+   // Serve the FFmpeg class worker from this GitHub Pages origin to avoid cross-origin Worker errors.
+   // worker.js imports ./const.js and ./errors.js, all stored beside index.html.
+   const classWorkerURL=new URL('./worker.js', window.location.href).href;
+   await ffmpeg.load({coreURL,wasmURL,classWorkerURL});
    ffmpegReady=true;
    console.info('[FFmpeg] Engine loaded successfully from',baseURL);
    return;

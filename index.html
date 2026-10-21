@@ -266,7 +266,8 @@ async function loadEngine(){
    },90000);
    // Do not pass the repository's core worker as classWorkerURL; FFmpeg creates its own class worker.
    setProgress(7,'راه‌اندازی موتور پردازش...','فایل‌ها دریافت شدند؛ در حال راه‌اندازی Worker.');
-   await Promise.race([ffmpeg.load({coreURL,wasmURL}),new Promise((_,reject)=>setTimeout(()=>reject(new Error('راه‌اندازی Worker بیشتر از ۶۰ ثانیه طول کشید.')),60000))]);
+   const classWorkerURL=new URL('./ffmpeg/worker.js',document.baseURI).href;
+    await Promise.race([ffmpeg.load({coreURL,wasmURL,classWorkerURL}),new Promise((_,reject)=>setTimeout(()=>reject(new Error('راه‌اندازی Worker بیشتر از ۶۰ ثانیه طول کشید.')),60000))]);
    ffmpegReady=true;console.info('[FFmpeg] Engine loaded successfully from',baseURL);return;
   }catch(error){lastError=error;console.error('[FFmpeg] CDN failed:',baseURL,error);try{ffmpeg.terminate()}catch(_){}ffmpeg=new FFmpegClass();attachFFmpegEvents(ffmpeg);}
   finally{if(coreURL)URL.revokeObjectURL(coreURL);if(wasmURL)URL.revokeObjectURL(wasmURL)}

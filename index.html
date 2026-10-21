@@ -246,10 +246,10 @@ async function loadEngine(){
  ffmpeg=new FFmpegClass();attachFFmpegEvents(ffmpeg);
  setProgress(3,'بارگیری موتور پردازش...','در حال دریافت فایل موتور؛ پیشرفت دانلود همین‌جا نمایش داده می‌شود.');
  const cdns=[
-  'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/umd',
-  'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd',
-  'https://fastly.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/umd',
-  'https://gcore.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/umd'
+  'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/esm',
+  'https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm',
+  'https://fastly.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/esm',
+  'https://gcore.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/esm'
  ];
  let lastError;
  for(const baseURL of cdns){
@@ -264,7 +264,7 @@ async function loadEngine(){
     const percent=total?Math.round(ratio*3):0;
     setProgress(4+percent,'بارگیری موتور پردازش...',total?`دریافت فایل موتور: ${mb(received)} از ${mb(total)} مگابایت`:`دریافت فایل موتور: ${mb(received)} مگابایت`);
    },90000);
-   // Do not pass the repository's core worker as classWorkerURL; FFmpeg creates its own class worker.
+   // Use the repository's module worker with the ESM core; UMD core cannot be imported as a module.
    setProgress(7,'راه‌اندازی موتور پردازش...','فایل‌ها دریافت شدند؛ در حال راه‌اندازی Worker.');
    const classWorkerURL=new URL('./ffmpeg/worker.js',document.baseURI).href;
     await Promise.race([ffmpeg.load({coreURL,wasmURL,classWorkerURL}),new Promise((_,reject)=>setTimeout(()=>reject(new Error('راه‌اندازی Worker بیشتر از ۶۰ ثانیه طول کشید.')),60000))]);

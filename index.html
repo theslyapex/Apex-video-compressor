@@ -246,10 +246,10 @@ async function loadEngine(){
  ffmpeg=new FFmpegClass();attachFFmpegEvents(ffmpeg);
  setProgress(3,'بارگیری موتور پردازش...','در حال دریافت فایل موتور؛ پیشرفت دانلود همین‌جا نمایش داده می‌شود.');
  const cdns=[
-  'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/umd',
-  'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd',
-  'https://fastly.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/umd',
-  'https://gcore.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/umd'
+  'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/esm',
+  'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm',
+  'https://fastly.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/esm',
+  'https://gcore.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/esm'
  ];
  let lastError;
  for(const baseURL of cdns){
@@ -270,7 +270,7 @@ async function loadEngine(){
     const check=await fetch(asset,{cache:'no-store'});
     if(!check.ok)throw new Error('فایل وابستهٔ Worker پیدا نشد (HTTP '+check.status+'): '+new URL(asset).pathname);
    }
-   setProgress(7,'راه‌اندازی موتور پردازش...','فایل‌های موتور دریافت شدند؛ در حال بررسی و اجرای Worker محلی.');
+   setProgress(7,'راه‌اندازی موتور پردازش...','فایل‌ها دریافت شدند؛ در حال راه‌اندازی Worker ماژولار.');
    let loadTimer;
    try{
     await Promise.race([
